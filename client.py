@@ -4,7 +4,7 @@ import rsa
 import random
 from datetime import datetime
 import cryptocode
-
+from cryptography.fernet import Fernet
 # parameters
 host = '127.0.0.1'
 port = 2007
@@ -14,9 +14,11 @@ g = 5
 P = 467
 my_private = None
 ########################################
-
+# username: [key, seq_number]
 connection_keys = {}
 
+# groupname: key
+group_keys = {}
 ClientMultiSocket = socket.socket()
 pub = PublicKey(n, e)
 print('Waiting for connection response')
@@ -73,7 +75,7 @@ def register(command):
         # set client private key
         global my_private
         my_private = p2
-        print(my_private)
+        
         ts = datetime.now().strftime('%H:%M')
         plaintext = f'register-{message[1]}-{p1.n}-{p1.e}-' + ts
         message = cryptocode.encrypt(plaintext, key)
@@ -135,8 +137,8 @@ def new_connection(command):
 
     if check_server_sign(message, sign):
         if 'connection key' in message:
-            key = splitted_message[3].split(':')[1].encode()
-            connection_keys[splitted_message[2]] = key
+            key = message.split('||')[1].split(':')[1].encode()
+            connection_keys[splitted_message[2]] = [key, 0]
             print(f'you have new connection with {splitted_message[2]} with main key: {key}')
         else:
             print(message)
@@ -144,20 +146,80 @@ def new_connection(command):
 def set_key(command):
     message = '-'.join(command[:len(command) - 1])
     sign = command[-1]
-
+    
     if check_server_sign(message, sign):
-        key = command[3].split(':')[1].encode()
-        connection_keys[command[1]] = key
+        key = message.split('||')[1].split(':')[1].encode()
+        connection_keys[command[1]] = [key, 0]
         print(f'{command[1]} set a new connection with you with key: {key}')
         print(f'time: {message[len(message) - 5: len(message)]}')
-        print('**********')
-        print(message)
+        
+def get_message(command):
+    splitted_message = '-'.join(command).split('||')
+    message = '||'.join(splitted_message[:len(splitted_message)-1])
+    my_username = splitted_message[0].split('-')[-1]
+    encrypted_message = splitted_message[1]
+    sign = splitted_message[-1]
+    user = input('username: ')
+    
+    
+    if command[1] in connection_keys:
+        key, seq = connection_keys[command[1]]
+        
+        f = Fernet(key)
+        main_message = f.decrypt(encrypted_message.encode()).decode().split('-')
+        
+        if check_server_sign(message, sign) and user == my_username and main_message[0] == command[1] and int(main_message[2]) == seq and main_message[3] == 'personal_message':
+            connection_keys[command[1]][1] += 1
+            print(f'you have a new message from {command[1]} at {message[len(message) - 5: len(message)]}')
+            print('content:')
+            print(main_message[1])
+        else:
+            print('you got an insecure message')
 
+def set_group(command):
+    text = '-'.join(command)
+
+    main_commands = text.split('||')
+    message = '||'.join(main_commands[:len(main_commands)-1])
+    sign = main_commands[-1]
+
+    username = input('username: ')
+
+    if check_server_sign(message, sign) and username == main_commands[2]:
+        group_keys[main_commands[3]] = main_commands[4].encode()
+        print(f'you are added to group {main_commands[3]}  by user {main_commands[1]} with key:{main_commands[4].encode()}')
+
+def send_group_message(command):
+    main_message = '-'.join(command)
+
+    main_commands = main_message.split('||')
+    message = '||'.join(main_commands[:len(main_commands)-1])
+    sign = main_commands[-1]
+
+    key = group_keys[main_commands[2]]
+    f = Fernet(key)
+
+    if check_server_sign(message, sign):
+        decrypted_message = f.decrypt(main_commands[3].encode()).decode().split('-')
+        
+        if decrypted_message[0] == main_commands[1] and decrypted_message[1] == main_commands[2] and decrypted_message[4] == 'group_message':
+            print('you have new group message')
+            print(f'group: {main_commands[2]}')
+            print(f'send by: {decrypted_message[0]}')
+            print(f'time: {decrypted_message[3]}')
+            print(f'content: {decrypted_message[2]}')
 
 
 def process_input(command):
     if command[0] == 'new_connection':
         set_key(command)
+    elif command[0] == 'send_message':
+        get_message(command)
+    elif command[0] == 'add_member':
+        set_group(command)
+    elif command[0] == 'group_message':
+        send_group_message(command)
+
 
 
 def check_mailbox(command):
@@ -172,7 +234,7 @@ def check_mailbox(command):
     response = rsa_decrypt(data, my_private)
 
     if 'there is no user with this username' in response or 'you dont have any message' in response:
-        print(response)
+        print(response.split('-')[0])
     else:
         command = response.split('-')
         process_input(command)
@@ -189,6 +251,103 @@ def help():
     print('check mailbox:')
     print('check_mailbox <your_username>')
 
+def send_message(command):
+    if command[2] not in connection_keys:
+        print('you dont have any connection with another user')
+    else:
+        ts = datetime.now().strftime('%H:%M')
+        key, seq = connection_keys[command[2]]
+        
+        f = Fernet(key)
+        encrypted_message = f.encrypt(f'{command[1]}-{command[3]}-{seq}-personal_message'.encode()).decode()
+        plaintext = f'send_message-{command[1]}-{command[2]}||{encrypted_message}||' + ts
+        sign = rsa.sign(plaintext.encode(), my_private, 'SHA-256').hex()
+        message = plaintext + '||' + sign
+        connection_keys[command[2]][1] += 1
+
+        ClientMultiSocket.send(rsa_encrypt(message, pub))
+
+        data = ClientMultiSocket.recv(2048)
+        response = rsa_decrypt(data, my_private)
+        
+        message = '-'.join(response.split('-')[:len(response.split('-')) - 1])
+        sign = response.split('-')[-1]
+        
+        if check_server_sign(message, sign):
+            print(message)
+
+def create_group(command):
+    ts = datetime.now().strftime('%H:%M')
+    plaintext = f'create_group-{command[1]}-{command[2]}-' + ts
+    sign = rsa.sign(plaintext.encode(), my_private, 'SHA-256').hex()
+    message = plaintext + '-' + sign
+
+    ClientMultiSocket.send(rsa_encrypt(message, pub))
+
+    data = ClientMultiSocket.recv(2048)
+    splitted_message = rsa_decrypt(data, my_private).split('||')
+
+    message = '||'.join(splitted_message[:len(splitted_message) - 1])
+    sign = splitted_message[-1]
+
+    if check_server_sign(message, sign):
+        if 'group_key' in message and splitted_message[1] == command[2]:
+            key = splitted_message[2].split(':')[1].encode()
+            group_keys[command[2]] = key
+            print(f'the group \"{splitted_message[0]}\" is created. admin: {splitted_message[0]} with key: {key}')
+        else:
+            print(message.replace('||', ' '))
+
+
+def add_member(command):
+    if command[3] not in group_keys:
+        print('there is no group with this name')
+    else:
+        ts = datetime.now().strftime('%H:%M')
+        key = group_keys[command[3]].decode()
+
+        plaintext = f'add_member-||{command[1]}||{command[2]}||{command[3]}||{key}||{ts}'
+        sign = rsa.sign(plaintext.encode(), my_private, 'SHA-256').hex()
+        message = plaintext + '||' + sign
+
+        ClientMultiSocket.send(rsa_encrypt(message, pub))
+
+        data = ClientMultiSocket.recv(2048)
+        splitted_message = rsa_decrypt(data, my_private).split('-')
+
+        message = '-'.join(splitted_message[:len(splitted_message) - 1])
+        sign = splitted_message[-1]
+
+        if check_server_sign(message, sign):
+            print(message)
+
+
+# groyp_message <sender> <group_name> <message>
+def group_message(command):
+    ts = datetime.now().strftime('%H:%M')
+    if command[2] not in group_keys:
+        print('you are not in this group')
+    else:
+        main_message = f'{command[1]}-{command[2]}-{command[3]}-{ts}-group_message'
+        f = Fernet(group_keys[command[2]])
+        encrypted = f.encrypt(main_message.encode()).decode()
+
+        plaintext = f'group_message-||{command[1]}||{command[2]}||{encrypted}||{ts}'
+        sign = rsa.sign(plaintext.encode(), my_private, 'SHA-256').hex()
+
+        message = plaintext + '||' + sign
+        ClientMultiSocket.send(rsa_encrypt(message, pub))
+
+        data = ClientMultiSocket.recv(2048)
+        splitted_message = rsa_decrypt(data, my_private).split('-')
+
+        message = '-'.join(splitted_message[:len(splitted_message) - 1])
+        sign = splitted_message[-1]
+
+        if check_server_sign(message, sign):
+            print(message)
+
+
 def run_command(command):
     if command[0] == 'register':
         register(command)
@@ -202,6 +361,14 @@ def run_command(command):
         check_mailbox(command)
     elif command[0] == 'help':
         help()
+    elif command[0] == 'send_message':
+        send_message(command)
+    elif command[0] == 'create_group':
+        create_group(command)
+    elif command[0] == 'add_member':
+        add_member(command)
+    elif command[0] == 'group_message':
+        group_message(command)
 
 
 while True:

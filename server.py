@@ -12,18 +12,27 @@ ServerSideSocket = socket.socket()
 host = '127.0.0.1'
 port = 2007
 ThreadCount = 0
-n = 19353072620215321890839106022762029874616444235223439384506680940328852784978944046938103327486305810943210038928498151161647567462545656069589447664175635864396307015807038943684431276693891870148118064557942055262537592536473689018920503531669331200322024475788186288928089621311451340215661550795441132293506814104945114183179870123103367402186037768285692824100462386028418539438996322154955270951250426145331720494910074450045563758975875988516544606871828721995156329535934701683337599110480406936432698277598516793178769767606955270092448746018533912221109558391545108250523168726755208689630948683233423809683
-e = 65537
-d = 5099830083023614279792962158980427177542853532238411861550427694881964197271562074715367570466888953644341934667365962289419007432109548504231346585292479536416439906663221730586235685925561325624578466742689767526496852512396060383550621725009221505860221900557882985333294288112802915078120647782883531650896025130264382290655376277635451623703139522651879483217140104843031673785959315978185610530216273214515508910534505539058349732206073386041695249200630328628046330672918849139116111945933814363365876052156083216049410406647494873120540717832080613961335158983453445837159202960545885645929103114295924224353
-p = 2876785668235688529478279133194284873232123972958953088091648131776598542717174150037901813176994888392395459798557603145387332504317389542428948390411717697277214661633264566620938362402016006786107192939389704416148543673321514390656062738581223250151588818476296000386042935106541212214625181212135201168279450748153747548379
-q = 6727325164993754590472155557373048516947121277270240743158602768793143097175515665856205739886263974595939838767433826791467666902622647134711749802645816146202460102725653769160273954007562580274287236295166212199060447254972874360600942086475321639262047478412960180456556950620383505577
 P = 467
 g = 5
 ###################
+password = input('private key password: ')
+file = open('private_key.txt', 'r')
+cipher = file.read()
+file.close()
+
+text = cryptocode.decrypt(cipher, password)
+
+parameters = []
+for x in text.split('\n'):
+    parameters.append(int(x))
+
+n, e, d, p, q = parameters
 prv = PrivateKey(n, e, d, p, q)
 # username: [hash(password) - connection object - pub. key - online state - mailbox list]
 users = {}
 
+#group_name: [admin_name, [member_name(s)]]
+groups = {}
 try:
     ServerSideSocket.bind((host, port))
 except socket.error as e:
@@ -140,12 +149,14 @@ def new_connection(command, connection):
     elif check_sign(message, sign, users[command[1]][2]):
         print('sign ok')
         conn_key = Fernet.generate_key().decode()
-        result = f'connection key: {conn_key}'
+        result = f'||connection key: {conn_key}||'
+        print(result)
 
-        plaintext2 = f'new_connection-{command[1]}-{command[2]}-connection key:{conn_key}-' + ts
+        plaintext2 = f'new_connection-{command[1]}-{command[2]}-||connection key:{conn_key}||-' + ts
         sign2 = rsa.sign(plaintext2.encode(), prv, 'SHA-256').hex()
         message2 = plaintext2 + '-' + sign2
 
+        print(message2)
         users[command[2]][4].append(rsa_encrypt(message2, users[command[2]][2]))
         print('message in mailbox')
     
@@ -179,6 +190,110 @@ def check_mailbox(command, connection):
             connection.send(message)
 
 
+def send_message(command, connection):
+    splitted_message = '-'.join(command).split('||')
+    message = '||'.join(splitted_message[:len(splitted_message)-1])
+    receiver = splitted_message[0].split('-')[-1]
+    sign = splitted_message[-1]
+    result = 'nothing'
+    ts = datetime.now().strftime('%H:%M')
+
+    # and timestamp check
+    if check_sign(message, sign, users[command[1]][2]):
+        sign2 = rsa.sign(message.encode(), prv, 'SHA-256').hex()
+        users[receiver][4].append(rsa_encrypt(message + '||' + sign2, users[receiver][2]))
+        result = 'message in mailbox'
+    else:
+        result = 'there is a problem with sending the message'
+    
+    plaintext = result + '-' + ts
+    sign = rsa.sign(plaintext.encode(), prv, 'SHA-256').hex()
+    message = plaintext + '-' + sign
+    print('||||||||||')
+    print(message)
+    connection.send(rsa_encrypt(message, users[command[1]][2]))
+
+    
+def create_group(command, connection):
+    message = '-'.join(command[:len(command) - 1])
+    sign = command[-1]
+    result = 'nothing'
+    if check_sign(message, sign, users[command[1]][2]):
+        if command[2] in groups:
+            result = 'the group name is already selected'
+        else:
+            group_key = Fernet.generate_key().decode()
+            result = f'{command[1]}||{command[2]}||group_key:{group_key}'
+            groups[command[2]] = [command[1], [command[1]]]
+
+    ts = datetime.now().strftime('%H:%M')
+    plaintext = result + '||' + ts
+    sign = rsa.sign(plaintext.encode(), prv, 'SHA-256').hex()
+    message = plaintext + '||' + sign
+
+    connection.send(rsa_encrypt(message, users[command[1]][2]))
+
+def add_member(command, connection):
+    main_message = '-'.join(command)
+
+    main_commands = main_message.split('||')
+    message = '||'.join(main_commands[:len(main_commands)-1])
+    sign = main_commands[-1]
+    result = 'nothing'
+
+    if main_commands[2] not in users:
+        result = 'there is no user with this username'
+    elif main_commands[3] not in groups:
+        result = 'there is no group with this name'
+    elif main_commands[1] != groups[main_commands[3]][0]:
+        result = 'you are not the admin of group'
+    elif main_commands[2] in groups[main_commands[3]][1]:
+        result = 'the user is already added to group'
+    elif check_sign(message, sign, users[main_commands[1]][2]):
+        result = f'the user {main_commands[2]} added to group {main_commands[3]}'
+
+        new_sign = rsa.sign(message.encode(), prv, 'SHA-256').hex()
+        new_message = message + '||' + new_sign
+        users[main_commands[2]][4].append(rsa_encrypt(new_message, users[main_commands[2]][2]))
+        groups[main_commands[3]][1].append(main_commands[2])
+
+    ts = datetime.now().strftime('%H:%M')
+    response = result + '-' + ts
+    sign = rsa.sign(response.encode(), prv, 'SHA-256').hex()
+    response_message = response + '-' + sign
+
+    connection.send(rsa_encrypt(response_message, users[main_commands[1]][2]))
+
+
+def group_message(command, connection):
+    main_message = '-'.join(command)
+
+    main_commands = main_message.split('||')
+    message = '||'.join(main_commands[:len(main_commands) - 1])
+    sign = main_commands[-1]
+    result = 'nothing'
+
+    if main_commands[2] not in groups:
+        result = 'there is no group with this name'
+    elif main_commands[1] not in groups[main_commands[2]][1]:
+        result = 'you are not in this group'
+    elif check_sign(message, sign, users[main_commands[1]][2]):
+        result = f'your message is sent in group {main_commands[2]}'
+
+        new_sign = rsa.sign(message.encode(), prv, 'SHA-256').hex()
+        new_message = message + '||' + new_sign
+        
+        for user in groups[main_commands[2]][1]:
+            users[user][4].append(rsa_encrypt(new_message, users[user][2]))
+
+        ts = datetime.now().strftime('%H:%M')
+        response = result + '-' + ts
+        sign = rsa.sign(response.encode(), prv, 'SHA-256').hex()
+        response_message = response + '-' + sign
+
+        connection.send(rsa_encrypt(response_message, users[main_commands[1]][2]))
+
+
 
 def run_command(command, connection):
     if command[0] == 'register':
@@ -193,6 +308,14 @@ def run_command(command, connection):
         new_connection(command, connection)
     elif command[0] == 'check_mailbox':
         check_mailbox(command, connection)
+    elif command[0] == 'send_message':
+        send_message(command, connection)
+    elif command[0] == 'create_group':
+        create_group(command, connection)
+    elif command[0] == 'add_member':
+        add_member(command, connection)
+    elif command[0] == 'group_message':
+        group_message(command, connection)
 
 def multi_threaded_client(connection):
     connection.send(str.encode('Server is working:'))
