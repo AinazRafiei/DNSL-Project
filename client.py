@@ -239,11 +239,13 @@ def send_group_message(command):
             print(f'content: {decrypted_message[2]}')
             
             with open("{}-{}-messages.txt".format(main_commands[1], main_commands[2]), 'a') as f:
+
                 f.write(f'group: {main_commands[2]}\n')
                 f.write(f'send by: {decrypted_message[0]}\n')
                 f.write(f'time: {decrypted_message[3]}\n')
                 f.write(f'content: {decrypted_message[2]}\n')
                 f.write('-----------------------------------------\n')
+
                 
 
 def delete(command, username):
