@@ -242,7 +242,7 @@ def send_group_message(command):
                 f.write(f'group: {main_commands[2]}')
                 f.write(f'send by: {decrypted_message[0]}')
                 f.write(f'time: {decrypted_message[3]}')
-                f.write(f'content: {decrypted_message[2]}'
+                f.write(f'content: {decrypted_message[2]}')
                 f.write('-----------------------------------------')
                 
 
