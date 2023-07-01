@@ -196,10 +196,10 @@ def get_message(command, username):
             print(main_message[1])
             
             with open("{}-mailbox.txt".format(my_username), 'a') as f:
-                f.write(f' message from {command[1]} at {message[len(message) - 16: len(message)]}')
-                f.write('content:')
-                f.write(main_message[1])
-                f.write('---------------------------------------------------------------------------')
+                f.write(f' message from {command[1]} at {message[len(message) - 16: len(message)]}\n')
+                f.write('content:\n')
+                f.write(main_message[1]+'\n')
+                f.write('---------------------------------------------------------------------------\n')
             
             
         else:
@@ -239,11 +239,13 @@ def send_group_message(command):
             print(f'content: {decrypted_message[2]}')
             
             with open("{}-{}-messages.txt".format(main_commands[1], main_commands[2]), 'a') as f:
-                f.write(f'group: {main_commands[2]}')
-                f.write(f'send by: {decrypted_message[0]}')
-                f.write(f'time: {decrypted_message[3]}')
-                f.write(f'content: {decrypted_message[2]}')
-                f.write('-----------------------------------------')
+
+                f.write(f'group: {main_commands[2]}\n')
+                f.write(f'send by: {decrypted_message[0]}\n')
+                f.write(f'time: {decrypted_message[3]}\n')
+                f.write(f'content: {decrypted_message[2]}\n')
+                f.write('-----------------------------------------\n')
+
                 
 
 def delete(command, username):
@@ -459,22 +461,23 @@ def delete_member(command):
 
 
 def show_pv_messages(command):
-    # to do check Integrity of user to see the file
-    
-    with open("{}-mailbox.txt".format(command[1]), "r") as f:
-        lines = f.readlines()
-        for line in lines:
-            print(line)
+    try:
+        with open("{}-mailbox.txt".format(command[1]), "r") as f:
+            lines = f.readlines()
+            for line in lines:
+                print(line)
+    except:
+        print("No chat memory for you!")          
             
-            
-def show_group(command):
-    # To Do chech Integrity of user
-    
-    with open("{}-{}-messages.txt", "r") as f:
-        lines = f.readlines()
-        for line in lines:
-            print(line)
 
+def show_group(command):
+    try:
+        with open("{}-{}-messages.txt".format(command[1], command[2]), "r") as f:
+            lines = f.readlines()
+            for line in lines:
+                print(line)
+    except:
+        print("No {} group messages for you!".format(command[2]))
 
 
 def run_command(command):
